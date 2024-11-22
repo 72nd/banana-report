@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // Everything with the same linked document. Filepath is map key.
 type Dossier struct {
 	JournalEntries     Entries
@@ -48,16 +50,24 @@ func EntriesFromJournal(journal Journal) Entries {
 		if _, exists := rsl[transaction.Path]; !exists {
 			rsl[transaction.Path] = Document{}
 		}
-		if _, exists := rsl[transaction.Path][transaction.Doc]; !exists {
-			rsl[transaction.Path][transaction.Doc] = []Transaction{}
+		if _, exists := rsl[transaction.Path][transaction.Ident]; !exists {
+			rsl[transaction.Path][transaction.Ident] = []Transaction{}
 		}
-		rsl[transaction.Path][transaction.Doc] = append(rsl[transaction.Path][transaction.Doc], transaction)
+		rsl[transaction.Path][transaction.Ident] = append(rsl[transaction.Path][transaction.Ident], transaction)
 	}
 	return rsl
 }
 
 // All docs of one doc-ident. Doc-ident is map key.
 type Document map[string][]Transaction
+
+func (d Document) IdentStringList() string {
+	rsl := []string{}
+	for ident, _ := range d {
+		rsl = append(rsl, ident)
+	}
+	return strings.Join(rsl, " — ")
+}
 
 type Journal []Transaction
 
@@ -75,7 +85,8 @@ func JournalFromTable(table Table) Journal {
 type Transaction struct {
 	Unique           string
 	Section          string
-	Doc              string
+	Date             string
+	Ident            string
 	Path             string
 	Description      string
 	AccountDebit     string
@@ -90,7 +101,8 @@ func TransactionFromRow(row Row) Transaction {
 	return Transaction{
 		Unique:           row.Unique,
 		Section:          row.Section,
-		Doc:              row.Doc,
+		Ident:            row.Doc,
+		Date:             row.Date,
 		Path:             row.DocLink,
 		Description:      row.Description,
 		AccountDebit:     row.AccountDebit,

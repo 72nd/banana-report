@@ -114,6 +114,7 @@ type Row struct {
 	ID                         string `xml:"ID,attr"`
 	NodeID                     string `xml:"Id"`
 	Unique                     string `xml:"Unique"`
+	Date                       string `xml:"Date,omitempty"`
 	BaseRow                    string `xml:"BaseRow,omitempty"`
 	Style                      string `xml:"Style,omitempty"`
 	Section                    string `xml:"Section,omitempty"`
