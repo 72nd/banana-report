@@ -1,10 +1,16 @@
 package main
 
-import "strings"
+import (
+	"fmt"
+	"path"
+	"sort"
+	"strings"
+	"time"
+)
 
 // Everything with the same linked document. Filepath is map key.
 type Dossier struct {
-	JournalEntries     Entries
+	JournalEntries     Documents
 	AccountingFilePath string
 	CompanyName        string
 	Street             string
@@ -42,36 +48,61 @@ func DossierFromXML(path string) (*Dossier, error) {
 	}, nil
 }
 
-type Entries map[string]Document
+type Documents []Document
 
-func EntriesFromJournal(journal Journal) Entries {
-	rsl := map[string]Document{}
+func EntriesFromJournal(journal Transactions) Documents {
+	tmp := map[string]Document{}
 	for _, transaction := range journal {
-		if _, exists := rsl[transaction.Path]; !exists {
-			rsl[transaction.Path] = Document{}
+		path := strings.TrimSpace(transaction.Path)
+		if _, exists := tmp[path]; !exists {
+			tmp[path] = Document{
+				Path:         transaction.Path,
+				Transactions: []Transaction{},
+			}
 		}
-		if _, exists := rsl[transaction.Path][transaction.Ident]; !exists {
-			rsl[transaction.Path][transaction.Ident] = []Transaction{}
-		}
-		rsl[transaction.Path][transaction.Ident] = append(rsl[transaction.Path][transaction.Ident], transaction)
+		// fmt.Println(tmp[path][transaction.Ident].transactions)
+		doc := tmp[path]
+		doc.Transactions = append(doc.Transactions, transaction)
+		tmp[path] = doc
 	}
+	rsl := Documents{}
+	for _, doc := range tmp {
+		sort.Sort(doc.Transactions)
+		rsl = append(rsl, doc)
+	}
+	sort.Sort(rsl)
 	return rsl
 }
 
+func (d Documents) Len() int {
+	return len(d)
+}
+
+func (d Documents) Swap(i, j int) {
+	d[i], d[j] = d[j], d[i]
+}
+
+func (d Documents) Less(i, j int) bool {
+	return path.Base(d[i].Path) < path.Base(d[j].Path)
+}
+
 // All docs of one doc-ident. Doc-ident is map key.
-type Document map[string][]Transaction
+type Document struct {
+	Path         string
+	Transactions Transactions
+}
 
 func (d Document) IdentStringList() string {
 	rsl := []string{}
-	for ident, _ := range d {
-		rsl = append(rsl, ident)
+	for _, transaction := range d.Transactions {
+		rsl = append(rsl, transaction.Ident)
 	}
-	return strings.Join(rsl, " — ")
+	return strings.Join(rsl, ", ")
 }
 
-type Journal []Transaction
+type Transactions []Transaction
 
-func JournalFromTable(table Table) Journal {
+func JournalFromTable(table Table) Transactions {
 	rsl := []Transaction{}
 	for _, row := range table.RowList {
 		if row.Section == "*" || row.DocLink == "" {
@@ -80,6 +111,16 @@ func JournalFromTable(table Table) Journal {
 		rsl = append(rsl, TransactionFromRow(row))
 	}
 	return rsl
+}
+
+func (t Transactions) Len() int {
+	return len(t)
+}
+func (t Transactions) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
+}
+func (t Transactions) Less(i, j int) bool {
+	return t[i].Ident < t[j].Ident
 }
 
 type Transaction struct {
@@ -92,6 +133,7 @@ type Transaction struct {
 	AccountDebit     string
 	AccountCredit    string
 	Amount           string
+	Currency         string
 	AmountCurrency   string
 	ExchangeCurrency string
 	ExchangeRate     string
@@ -108,8 +150,32 @@ func TransactionFromRow(row Row) Transaction {
 		AccountDebit:     row.AccountDebit,
 		AccountCredit:    row.AccountCredit,
 		Amount:           row.Amount,
+		Currency:         row.Currency,
 		AmountCurrency:   row.AmountCurrency,
 		ExchangeCurrency: row.ExchangeCurrency,
 		ExchangeRate:     row.ExchangeRate,
 	}
+}
+
+func (t Transaction) ParsedDate() (time.Time, error) {
+	return time.Parse("2006-01-02", t.Date)
+}
+
+func (t Transaction) FmtDate() string {
+	date, err := t.ParsedDate()
+	if err != nil {
+		return "<UNDEFINED>"
+	}
+	return date.Format("02.01.06")
+}
+
+func (t Transaction) FmtDescription() string {
+	rsl := strings.TrimSpace(t.Description)
+	rsl = strings.ReplaceAll(rsl, "\n", "")
+	rsl = strings.ReplaceAll(rsl, "\t", "")
+	return rsl
+}
+
+func (t Transaction) FmtAmount() string {
+	return fmt.Sprintf("%s CHF", t.Amount)
 }
