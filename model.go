@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -10,13 +11,13 @@ import (
 
 // Everything with the same linked document. Filepath is map key.
 type Dossier struct {
-	JournalEntries     Documents
-	AccountingFilePath string
-	CompanyName        string
-	Street             string
-	ZIPCode            string
-	Place              string
-	LastSaved          string
+	JournalEntries    Documents
+	AccountingDirPath string
+	CompanyName       string
+	Street            string
+	ZIPCode           string
+	Place             string
+	LastSaved         string
 }
 
 func DossierFromXML(path string) (*Dossier, error) {
@@ -38,14 +39,19 @@ func DossierFromXML(path string) (*Dossier, error) {
 	}
 
 	return &Dossier{
-		JournalEntries:     entries,
-		AccountingFilePath: fileInfoTable.GuardedValueById("Dateiname"),
-		CompanyName:        fileInfoTable.GuardedValueById("Firma"),
-		Street:             fileInfoTable.GuardedValueById("Adresse1"),
-		ZIPCode:            fileInfoTable.GuardedValueById("Postleitzahl"),
-		Place:              fileInfoTable.GuardedValueById("Ort"),
-		LastSaved:          fileInfoTable.GuardedValueById("ZeitLetzteSpeicherung"),
+		JournalEntries:    entries,
+		AccountingDirPath: filepath.Dir(fileInfoTable.GuardedValueById("Dateiname")),
+		CompanyName:       fileInfoTable.GuardedValueById("Firma"),
+		Street:            fileInfoTable.GuardedValueById("Adresse1"),
+		ZIPCode:           fileInfoTable.GuardedValueById("Postleitzahl"),
+		Place:             fileInfoTable.GuardedValueById("Ort"),
+		LastSaved:         fileInfoTable.GuardedValueById("ZeitLetzteSpeicherung"),
 	}, nil
+}
+
+func (d Dossier) ResolveRelativePath(path string) (string, error) {
+	fullPath := filepath.Join(d.AccountingDirPath, path)
+	return filepath.Abs(fullPath)
 }
 
 type Documents []Document
@@ -56,7 +62,7 @@ func EntriesFromJournal(journal Transactions) Documents {
 		path := strings.TrimSpace(transaction.Path)
 		if _, exists := tmp[path]; !exists {
 			tmp[path] = Document{
-				Path:         transaction.Path,
+				Path:         path,
 				Transactions: []Transaction{},
 			}
 		}
@@ -95,7 +101,16 @@ type Document struct {
 func (d Document) IdentStringList() string {
 	rsl := []string{}
 	for _, transaction := range d.Transactions {
-		rsl = append(rsl, transaction.Ident)
+		add := true
+		for _, item := range rsl {
+			if item == transaction.Ident {
+				add = false
+				break
+			}
+		}
+		if add {
+			rsl = append(rsl, transaction.Ident)
+		}
 	}
 	return strings.Join(rsl, ", ")
 }
@@ -170,12 +185,27 @@ func (t Transaction) FmtDate() string {
 }
 
 func (t Transaction) FmtDescription() string {
-	rsl := strings.TrimSpace(t.Description)
-	rsl = strings.ReplaceAll(rsl, "\n", "")
-	rsl = strings.ReplaceAll(rsl, "\t", "")
-	return rsl
+	return removeExtraSpaces(t.Description)
 }
 
 func (t Transaction) FmtAmount() string {
 	return fmt.Sprintf("%s CHF", t.Amount)
+}
+
+func removeExtraSpaces(text string) string {
+	var builder strings.Builder
+	lastWasSpace := false
+
+	for _, char := range text {
+		if char == ' ' || char == '\t' || char == '\n' || char == '\r' {
+			if !lastWasSpace {
+				builder.WriteRune(' ')
+				lastWasSpace = true
+			}
+			continue
+		}
+		builder.WriteRune(char)
+		lastWasSpace = false
+	}
+	return strings.TrimSpace(builder.String())
 }

@@ -3,13 +3,15 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
+	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/qr"
 	"github.com/go-pdf/fpdf"
-	"github.com/go-pdf/fpdf/contrib/barcode"
+	fc "github.com/go-pdf/fpdf/contrib/barcode"
+	"github.com/go-pdf/fpdf/contrib/gofpdi"
 )
 
 //go:embed literata_7pt-regular.ttf
@@ -21,11 +23,22 @@ var literataItalic []byte
 //go:embed literata_7pt-semi-bold.ttf
 var literataSemiBold []byte
 
+type DebugColor int
+
+const (
+	ColorMagenta DebugColor = iota
+	ColorTeal
+	ColorGreen
+)
+
 type PDF struct {
 	*fpdf.Fpdf
-	debugMode    bool
+	debugCells   bool
+	debugLines   bool
 	PageWidth    float64
 	PageHeight   float64
+	AreaWidth    float64
+	AreaHeight   float64
 	FontFamily   string
 	LeftMargin   float64
 	TopMargin    float64
@@ -33,9 +46,10 @@ type PDF struct {
 	BottomMargin float64
 }
 
-func NewPDF(debugMode bool) PDF {
+func NewPDF(debugCells bool, debugLines bool) PDF {
 	fontName := "Literata"
 	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetAutoPageBreak(false, 10)
 	pdf.AddUTF8FontFromBytes(fontName, "", literataRegular)
 	pdf.AddUTF8FontFromBytes(fontName, "I", literataItalic)
 	pdf.AddUTF8FontFromBytes(fontName, "B", literataSemiBold)
@@ -44,9 +58,12 @@ func NewPDF(debugMode bool) PDF {
 	lm, tm, rm, bm := pdf.GetMargins()
 	return PDF{
 		Fpdf:         pdf,
-		debugMode:    debugMode,
+		debugCells:   debugCells,
+		debugLines:   debugLines,
 		PageWidth:    pageWidth,
 		PageHeight:   pageHeight,
+		AreaWidth:    pageWidth - lm - rm,
+		AreaHeight:   pageHeight - tm - bm,
 		FontFamily:   fontName,
 		LeftMargin:   lm,
 		TopMargin:    tm,
@@ -56,31 +73,32 @@ func NewPDF(debugMode bool) PDF {
 }
 
 func (pdf PDF) Build(dossier *Dossier) {
-	for _, doc := range dossier.JournalEntries {
-		// FOR DEBUGGING
-		title := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
-		if !strings.HasPrefix(title, "hetzner_2023-04-01_") {
-		}
+	for i, doc := range dossier.JournalEntries {
 		pdf.addDocument(*dossier, doc)
+		if i == 4 {
+			return
+		}
 	}
 }
 
 func (pdf PDF) addDocument(dossier Dossier, doc Document) {
 	pdf.AddPage()
-	pdf.Rect(10, 10, pdf.PageWidth-20, pdf.PageHeight-20, "D")
-	pdf.addHeader(doc, doc.Path)
+	pdf.Rect(pdf.LeftMargin, pdf.TopMargin, pdf.AreaWidth, pdf.AreaHeight, "D")
+	pdf.addHeader(doc)
 
 	pdf.addTableHeader(4.5)
-	pdf.addTableRows(doc.Transactions, 4.5)
+	tableBottomY := pdf.addTableRows(doc.Transactions, 4.5)
+	pdf.embedDocument(dossier, doc, tableBottomY, 10)
+	pdf.addFooter(doc, 0)
 }
 
-func (pdf PDF) addHeader(doc Document, path string) {
-	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	description1 := fmt.Sprintf("%s — ", path)
+func (pdf PDF) addHeader(doc Document) {
+	title := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
+	description1 := fmt.Sprintf("%s — ", doc.Path)
 	description2 := doc.IdentStringList()
 	description := fmt.Sprintf("%s%s", description1, description2)
 	qrBlockDimensions := 15.
-	textBlockWidth := pdf.PageWidth - pdf.LeftMargin - pdf.RightMargin - qrBlockDimensions
+	textBlockWidth := pdf.AreaWidth - qrBlockDimensions
 	qrBlockX := pdf.LeftMargin + textBlockWidth
 
 	pdf.Bookmark(title, 0, -1)
@@ -92,12 +110,20 @@ func (pdf PDF) addHeader(doc Document, path string) {
 	pdf.TextCell(pdf.GetStringWidth(description2), 5, description2, 0, "LT", descFontSize, "I", 0, description2)
 
 	pdf.Line(qrBlockX, pdf.TopMargin, qrBlockX, pdf.TopMargin+qrBlockDimensions)
-	qrKey := barcode.RegisterQR(pdf, path, qr.L, qr.Unicode)
-	barcode.Barcode(
+	qrCode, err := qr.Encode(doc.Path, qr.L, qr.Unicode)
+	if err != nil {
+		panic(err)
+	}
+	qrCode, err = barcode.Scale(qrCode, 256, 256)
+	if err != nil {
+		panic(err)
+	}
+	qrKey := fc.Register(qrCode)
+	fc.Barcode(
 		pdf, qrKey,
-		pdf.PageWidth-pdf.RightMargin-qrBlockDimensions+1,
-		pdf.TopMargin+1,
-		13, 13, false,
+		pdf.PageWidth-pdf.RightMargin-qrBlockDimensions+.5,
+		pdf.TopMargin+.5,
+		14, 14, false,
 	)
 	pdf.Line(pdf.LeftMargin, pdf.TopMargin+qrBlockDimensions, pdf.PageWidth-pdf.RightMargin, pdf.TopMargin+qrBlockDimensions)
 	pdf.Ln(5.7)
@@ -106,101 +132,106 @@ func (pdf PDF) addHeader(doc Document, path string) {
 func (pdf PDF) addTableHeader(rowHeight float64) {
 	pdf.SetFont(pdf.FontFamily, "B", 7)
 	pdf.SetCellMargin(1.5)
-	pdf.CellFormat(23, rowHeight, "Beleg", "TB", 0, "L", false, 0, "")
+	pdf.CellFormat(23, rowHeight, "Beleg", "", 0, "L", false, 0, "")
 	pdf.SetCellMargin(0)
-	pdf.CellFormat(14, rowHeight, "Datum", "TB", 0, "L", false, 0, "")
-	pdf.CellFormat(103.49, rowHeight, "Beschreibung", "TB", 0, "L", false, 0, "")
-	pdf.CellFormat(14, rowHeight, "Soll", "TB", 0, "R", false, 0, "")
-	pdf.CellFormat(14, rowHeight, "Haben", "TB", 0, "R", false, 0, "")
-	pdf.CellFormat(20, rowHeight, "Betrag", "TB", 1, "R", false, 0, "")
+	pdf.CellFormat(14, rowHeight, "Datum", "", 0, "L", false, 0, "")
+	pdf.CellFormat(103.49, rowHeight, "Beschreibung", "", 0, "L", false, 0, "")
+	pdf.CellFormat(14, rowHeight, "Soll", "", 0, "R", false, 0, "")
+	pdf.CellFormat(14, rowHeight, "Haben", "", 0, "R", false, 0, "")
+	pdf.CellFormat(20, rowHeight, "Betrag", "", 1, "R", false, 0, "")
+	pdf.HLine(0, false, ColorTeal)
 }
 
-func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) {
+func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) float64 {
 	pdf.SetFont(pdf.FontFamily, "", 7)
-
-	// Merged cell for "Ident"
-	pdf.SetCellMargin(1.5)
-	pdf.CellFormat(23, rowHeight, "<Ident>", "T", 0, "L", false, 0, "")
-	pdf.SetCellMargin(0)
 
 	// First row of the group
 	first := true
+	previousIdent := ""
 	for _, tx := range transactions {
-		if tx.Ident == "e-inv-4" {
-			fmt.Println(strconv.Quote(tx.FmtDescription()))
-		}
 
-		if !first {
+		if previousIdent != tx.Ident {
+			// Merged cell for "Ident"
+			if !first {
+				pdf.HLine(0, false, ColorMagenta)
+			}
+
+			pdf.SetCellMargin(1.5)
+			pdf.CellFormat(23, rowHeight, tx.Ident, "", 0, "L", false, 0, "")
+			pdf.SetCellMargin(0)
+		} else {
 			// Empty Ident cell for subsequent rows
+			pdf.HLine(23, true, ColorGreen)
 			pdf.CellFormat(23, rowHeight, "", "", 0, "L", false, 0, "")
 		}
-		// Add transaction details
-		pdf.TableCell(14, rowHeight, tx.FmtDate(), "B", 0, "L")
-		pdf.TableCell(103.49, rowHeight, tx.FmtDescription(), "B", 0, "L")
-		pdf.TableCell(14, rowHeight, tx.AccountDebit, "B", 0, "R")
-		pdf.TableCell(14, rowHeight, tx.AccountCredit, "B", 0, "R")
-		pdf.TableCell(20, rowHeight, tx.FmtAmount(), "B", 1, "R")
-		first = false
-		pdf.SetDashPattern([]float64{}, 0)
-	}
 
-	// Draw dotted separator
-	pdf.SetDrawColor(150, 150, 150)
-	pdf.Line(10, pdf.GetY(), 200, pdf.GetY())
-	pdf.SetDrawColor(0, 0, 0)
+		// Add transaction details
+		pdf.TableCell(14, rowHeight, tx.FmtDate(), "", 0, "L")
+		pdf.TableCell(103.49, rowHeight, tx.FmtDescription(), "", 0, "L")
+		pdf.TableCell(14, rowHeight, tx.AccountDebit, "", 0, "R")
+		pdf.TableCell(14, rowHeight, tx.AccountCredit, "", 0, "R")
+		pdf.TableCell(20, rowHeight, tx.FmtAmount(), "", 1, "R")
+		pdf.SetDashPattern([]float64{}, 0)
+		first = false
+		previousIdent = tx.Ident
+	}
+	pdf.HLine(0, false, ColorMagenta)
+	return pdf.GetY()
 }
 
-func (pdf PDF) Lol(document Document) {
-	pdf.SetFont(pdf.FontFamily, "", 7)
-	pageWidth, _ := pdf.GetPageSize()
+func (pdf PDF) embedDocument(dossier Dossier, doc Document, tableBottomY, footerHeight float64) {
+	path, err := dossier.ResolveRelativePath(doc.Path)
+	if err != nil {
+		// TODO: Print error to the document.
+		panic(err)
+	}
+	if _, err = os.Stat(path); err != nil {
+		panic(err)
+	}
+	tpl := gofpdi.ImportPage(pdf, path, 1, "/MediaBox")
+	width, height := fitImage(
+		210,
+		297,
+		pdf.AreaWidth,
+		pdf.AreaHeight-tableBottomY-pdf.BottomMargin-footerHeight,
+	)
+	gofpdi.UseImportedTemplate(pdf, tpl, pdf.LeftMargin+1.5, tableBottomY+1.5, width, height)
+}
 
-	// Table settings
-	leftMargin := 10.0
-	top := 50.0
-	rowHeight := 4.5
-	tableWidth := pageWidth - 2*leftMargin
-	col1Width := 50.0
-	col2Width := (tableWidth - col1Width) / 2
-	col3Width := col2Width
+func (pdf PDF) addFooter(doc Document, footerHeight float64) {
+	lineY := pdf.AreaHeight - footerHeight
+	if pdf.debugLines {
+		pdf.SetDrawColor(255, 0, 255)
+	}
+	pdf.Line(pdf.LeftMargin, lineY, pdf.PageWidth-pdf.RightMargin, lineY)
+	if pdf.debugLines {
+		pdf.SetDrawColor(0, 0, 0)
+	}
+}
 
-	// Example data
-	mergedText := document.IdentStringList() + "\n\n "
-	rows := [][]string{
-		{"", "Data 1", "Data 2"},
-		{"", "Data 3", "Data 4"},
-		{"", "Data 5", "Data 6"},
+func (pdf PDF) HLine(x1 float64, dotted bool, debugColor DebugColor) {
+	if pdf.debugLines && debugColor == ColorTeal {
+		// Teal
+		pdf.SetDrawColor(0x43, 0x95, 0xb7)
+	} else if pdf.debugLines && debugColor == ColorGreen {
+		// Green
+		pdf.SetDrawColor(0x3e, 0x8c, 0x5f)
+	} else if pdf.debugLines {
+		// Magenta
+		pdf.SetDrawColor(255, 0, 255)
 	}
 
-	// Draw merged column 1
-	pdf.SetXY(leftMargin, top)
-	pdf.MultiCell(col1Width, rowHeight, mergedText, "", "L", false)
+	if dotted {
+		pdf.SetDashPattern([]float64{.6, .6}, 0)
+	}
 
-	// Draw other columns for each row
-	currentY := top
-	for _, row := range rows {
-		// Top border (dashed)
-		pdf.SetDashPattern([]float64{1, 1}, 0)
-		pdf.Line(leftMargin+col1Width, currentY, leftMargin+tableWidth, currentY)
+	pdf.Line(pdf.LeftMargin+x1, pdf.GetY(), pdf.PageWidth-pdf.RightMargin, pdf.GetY())
 
-		// Reset to solid for the bottom border
+	if dotted {
 		pdf.SetDashPattern([]float64{}, 0)
-		bottomY := currentY + rowHeight
-		pdf.Line(leftMargin+col1Width, bottomY, leftMargin+tableWidth, bottomY)
-
-		// Draw text in column 2 and column 3
-		currentX := leftMargin + col1Width
-		for i, cell := range row[1:] {
-			pdf.SetXY(currentX, currentY)
-			width := col2Width
-			if i == 1 {
-				width = col3Width
-			}
-			pdf.CellFormat(width, rowHeight, cell, "0", 0, "C", false, 0, "")
-			currentX += width
-		}
-
-		// Move to next row
-		currentY += rowHeight
+	}
+	if pdf.debugLines {
+		pdf.SetDrawColor(0, 0, 0)
 	}
 }
 
@@ -237,14 +268,14 @@ func (pdf PDF) TextCell(
 
 	drawR, drawG, drawB := pdf.GetDrawColor()
 	borderStr := ""
-	if pdf.debugMode {
+	if pdf.debugCells {
 		borderStr = "1"
 		pdf.setDebugDrawColor()
 	}
 
 	pdf.CellFormat(w, h, txtStr, borderStr, ln, alignStr, false, 0, "")
 
-	if pdf.debugMode {
+	if pdf.debugCells {
 		pdf.SetDrawColor(drawR, drawG, drawB)
 	}
 
@@ -254,7 +285,7 @@ func (pdf PDF) TextCell(
 
 func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, alignStr string) {
 	drawR, drawG, drawB := pdf.GetDrawColor()
-	if pdf.debugMode {
+	if pdf.debugCells {
 		borderStr = "1"
 		pdf.setDebugDrawColor()
 	}
@@ -267,11 +298,28 @@ func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, 
 
 	pdf.CellFormat(w, h, txtStr, borderStr, ln, alignStr, false, 0, "")
 
-	if pdf.debugMode {
+	if pdf.debugCells {
 		pdf.SetDrawColor(drawR, drawG, drawB)
 	}
 }
 
 func (pdf PDF) setDebugDrawColor() {
 	pdf.SetDrawColor(0xDA, 0x6A, 0x35)
+}
+
+func fitImage(origWidth, origHeight, maxWidth, maxHeight float64) (float64, float64) {
+	if origWidth <= 0 || origHeight <= 0 || maxWidth <= 0 || maxHeight <= 0 {
+		return 0, 0
+	}
+	aspectRatio := origWidth / origHeight
+
+	var newWidth, newHeight float64
+	if maxWidth/maxHeight > aspectRatio {
+		newHeight = maxHeight
+		newWidth = aspectRatio * maxHeight
+	} else {
+		newWidth = maxWidth
+		newHeight = maxWidth / aspectRatio
+	}
+	return newWidth, newHeight
 }
