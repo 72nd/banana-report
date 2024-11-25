@@ -108,6 +108,7 @@ func NewPDF(debugCells, debugLines, stepEmbedError bool) PDF {
 }
 
 func (pdf PDF) Build(dossier *Dossier) {
+	runningPageCount := 1
 	for i, doc := range dossier.JournalEntries {
 		// FOR DEBUG
 		if doc.Path != "../internal-expenses/2023/hetzner_2023-10-01_R0020566025.pdf" {
@@ -115,11 +116,12 @@ func (pdf PDF) Build(dossier *Dossier) {
 		}
 		embedPDFPageCount := 1
 		for page := 1; page <= embedPDFPageCount; page++ {
-			embedPDFPageCount = pdf.addDocument(*dossier, doc, page, i+1)
+			embedPDFPageCount = pdf.addDocument(*dossier, doc, page, runningPageCount)
+			runningPageCount++
 		}
 		// FOR DEBUG
 		if i == 10 {
-			return
+			// return
 		}
 	}
 }
@@ -143,7 +145,7 @@ func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr, reportPag
 func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 	title := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
 	if embedPageNr != 1 {
-		title = fmt.Sprintf("%s (cont.)", title)
+		title = fmt.Sprintf("→ %s (cont.)", title)
 	}
 	description1 := fmt.Sprintf("%s — ", doc.Path)
 	description2 := doc.IdentStringList()
@@ -226,14 +228,13 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64, baseCu
 			pdf.ForeignAmountTableCell(20, rowHeight, tx, baseCurrency)
 		} else {
 			amount := fmt.Sprint(tx.Amount, " ", baseCurrency)
-			pdf.TableCell(20, rowHeight, amount, "", 0, "R")
+			pdf.TableCell(20, rowHeight, amount, "", 1, "R")
 		}
 
 		pdf.SetDashPattern([]float64{}, 0)
 		first = false
 		previousIdent = tx.Ident
 	}
-	pdf.SetY(pdf.GetY() + rowHeight)
 	pdf.HLine(0, false, ColorMagenta)
 }
 
