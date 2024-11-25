@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -59,6 +60,7 @@ type PDF struct {
 	*fpdf.Fpdf
 	debugCells         bool
 	debugLines         bool
+	stepEmbedError     bool
 	sadDocumentOptions fpdf.ImageOptions
 	PageWidth          float64
 	PageHeight         float64
@@ -71,7 +73,7 @@ type PDF struct {
 	BottomMargin       float64
 }
 
-func NewPDF(debugCells bool, debugLines bool) PDF {
+func NewPDF(debugCells, debugLines, stepEmbedError bool) PDF {
 	fontName := "Literata"
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetAutoPageBreak(false, 10)
@@ -91,6 +93,7 @@ func NewPDF(debugCells bool, debugLines bool) PDF {
 		Fpdf:               pdf,
 		debugCells:         debugCells,
 		debugLines:         debugLines,
+		stepEmbedError:     stepEmbedError,
 		sadDocumentOptions: sadDocumentOpt,
 		PageWidth:          pageWidth,
 		PageHeight:         pageHeight,
@@ -106,16 +109,17 @@ func NewPDF(debugCells bool, debugLines bool) PDF {
 
 func (pdf PDF) Build(dossier *Dossier) {
 	for i, doc := range dossier.JournalEntries {
+		// FOR DEBUG
 		if doc.Path != "../internal-expenses/2023/hetzner_2023-10-01_R0020566025.pdf" {
-			continue
+			// continue
 		}
 		embedPDFPageCount := 1
 		for page := 1; page <= embedPDFPageCount; page++ {
 			embedPDFPageCount = pdf.addDocument(*dossier, doc, page, i+1)
 		}
+		// FOR DEBUG
 		if i == 10 {
-			// FOR DEBUG
-			// return
+			return
 		}
 	}
 }
@@ -129,6 +133,7 @@ func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr, reportPag
 	if embedPageNr == 1 {
 		pdf.addTableHeader(5)
 		pdf.addTableRows(doc.Transactions, 5, dossier.BaseCurrency)
+		pdf.HLine(0, false, ColorMagenta)
 	}
 	pageCount = pdf.embedDocument(dossier, doc, embedPageNr, 10)
 	pdf.addFooter(dossier, doc, 10, embedPageNr, pageCount, reportPageCount)
@@ -228,6 +233,7 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64, baseCu
 		first = false
 		previousIdent = tx.Ident
 	}
+	pdf.SetY(pdf.GetY() + rowHeight)
 	pdf.HLine(0, false, ColorMagenta)
 }
 
@@ -264,10 +270,7 @@ func (pdf PDF) embedDocument(dossier Dossier, doc Document, page int, footerHeig
 		})
 	}
 	if len(errors) != 0 {
-		pdf.addEmbedPDFErrors(errors)
-		for _, err := range errors {
-			fmt.Printf("%s: error during %s\n", path, err.Operation)
-		}
+		pdf.addHandleEmbedPDFErrors(errors, path)
 	}
 	return pageCount
 }
@@ -283,7 +286,7 @@ func (pdf PDF) embedPDF(path string, page int, tableBottomY, footerHeight float6
 		210,
 		297,
 		pdf.AreaWidth-2,
-		pdf.AreaHeight-tableBottomY+footerHeight-footerHeight-2,
+		pdf.AreaHeight-tableBottomY-2,
 	)
 	x := (pdf.AreaWidth - 2 - width) / 2
 	gofpdi.UseImportedTemplate(pdf, tpl, pdf.LeftMargin+x+1, tableBottomY+1, width, height)
@@ -291,7 +294,15 @@ func (pdf PDF) embedPDF(path string, page int, tableBottomY, footerHeight float6
 	return len(gofpdi.GetPageSizes())
 }
 
-func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
+func (pdf PDF) addHandleEmbedPDFErrors(errors []EmbedError, path string) {
+	for _, err := range errors {
+		fmt.Printf("%s: error during %s\n", path, err.Operation)
+	}
+	if pdf.stepEmbedError {
+		exec.Command("open", path).Start()
+		fmt.Println("File was opened in preview, press Enter to continue...")
+		fmt.Scanln()
+	}
 	pdf.ImageOptions(
 		"sad-document",
 		(pdf.AreaWidth-20)/2,
