@@ -12,7 +12,7 @@ import (
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/qr"
 	"github.com/go-pdf/fpdf"
-	fc "github.com/go-pdf/fpdf/contrib/barcode"
+	cbarcode "github.com/go-pdf/fpdf/contrib/barcode"
 	"github.com/go-pdf/fpdf/contrib/gofpdi"
 )
 
@@ -106,13 +106,16 @@ func NewPDF(debugCells bool, debugLines bool) PDF {
 
 func (pdf PDF) Build(dossier *Dossier) {
 	for i, doc := range dossier.JournalEntries {
+		if doc.Path != "../internal-expenses/2023/hetzner_2023-10-01_R0020566025.pdf" {
+			continue
+		}
 		embedPDFPageCount := 1
 		for page := 1; page <= embedPDFPageCount; page++ {
 			embedPDFPageCount = pdf.addDocument(*dossier, doc, page, i+1)
 		}
 		if i == 10 {
 			// FOR DEBUG
-			return
+			// return
 		}
 	}
 }
@@ -124,8 +127,8 @@ func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr, reportPag
 	pdf.addHeader(doc, embedPageNr)
 
 	if embedPageNr == 1 {
-		pdf.addTableHeader(4.5)
-		pdf.addTableRows(doc.Transactions, 4.5)
+		pdf.addTableHeader(5)
+		pdf.addTableRows(doc.Transactions, 5, dossier.BaseCurrency)
 	}
 	pageCount = pdf.embedDocument(dossier, doc, embedPageNr, 10)
 	pdf.addFooter(dossier, doc, 10, embedPageNr, pageCount, reportPageCount)
@@ -161,8 +164,8 @@ func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 	if err != nil {
 		panic(err)
 	}
-	qrKey := fc.Register(qrCode)
-	fc.Barcode(
+	qrKey := cbarcode.Register(qrCode)
+	cbarcode.Barcode(
 		pdf, qrKey,
 		pdf.PageWidth-pdf.RightMargin-qrBlockDimensions+.5,
 		pdf.TopMargin+.5,
@@ -186,7 +189,7 @@ func (pdf PDF) addTableHeader(rowHeight float64) {
 	pdf.HLine(0, false, ColorTeal)
 }
 
-func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) {
+func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64, baseCurrency string) {
 	pdf.SetFont(pdf.FontFamily, "", 7)
 
 	// First row of the group
@@ -213,7 +216,14 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) {
 		pdf.TableCell(103.49, rowHeight, tx.FmtDescription(), "", 0, "L")
 		pdf.TableCell(14, rowHeight, tx.AccountDebit, "", 0, "R")
 		pdf.TableCell(14, rowHeight, tx.AccountCredit, "", 0, "R")
-		pdf.TableCell(20, rowHeight, tx.FmtAmount(), "", 1, "R")
+
+		if tx.ExchangeCurrency != baseCurrency {
+			pdf.ForeignAmountTableCell(20, rowHeight, tx, baseCurrency)
+		} else {
+			amount := fmt.Sprint(tx.Amount, " ", baseCurrency)
+			pdf.TableCell(20, rowHeight, amount, "", 0, "R")
+		}
+
 		pdf.SetDashPattern([]float64{}, 0)
 		first = false
 		previousIdent = tx.Ident
@@ -407,6 +417,9 @@ func (pdf PDF) TextCell(
 
 func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, alignStr string) {
 	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugCells, ColorVermilion)
+	if pdf.debugCells {
+		borderStr = "1"
+	}
 
 	for pdf.GetStringWidth(txtStr) > w-1.5 {
 		txtStr = strings.TrimSuffix(txtStr, "…")
@@ -419,6 +432,44 @@ func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, 
 	if pdf.debugCells {
 		pdf.SetDrawColor(drawR, drawG, drawB)
 	}
+}
+
+func (pdf PDF) ForeignAmountTableCell(
+	w, h float64,
+	transaction Transaction,
+	baseCurrency string,
+) {
+	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugCells, ColorVermilion)
+	borderStr := ""
+	if pdf.debugCells {
+		borderStr = "1"
+	}
+	fontSize, _ := pdf.GetFontSize()
+
+	pdf.SetFont(pdf.FontFamily, "", 7)
+	_, height7pt := pdf.GetFontSize()
+	pdf.SetFont(pdf.FontFamily, "", 4)
+	_, height5pt := pdf.GetFontSize()
+	margin := (h - height7pt - height5pt) / 2
+
+	pdf.SetFont(pdf.FontFamily, "", 7)
+	baseAmount := fmt.Sprint(transaction.Amount, " ", baseCurrency)
+	pdf.CellFormat(w, height7pt+margin, baseAmount, borderStr, 2, "RB", false, 0, "")
+
+	exchangeInfo := fmt.Sprintf(
+		"%s %s – %s",
+		transaction.AmountCurrency,
+		transaction.ExchangeCurrency,
+		transaction.ExchangeRate[:6],
+	)
+	pdf.SetFont(pdf.FontFamily, "", 4)
+	pdf.CellFormat(w, height5pt+margin, exchangeInfo, borderStr, 2, "RT", false, 0, "")
+
+	if pdf.debugCells {
+		pdf.SetDrawColor(drawR, drawG, drawB)
+	}
+	pdf.SetFontSize(fontSize)
+	pdf.CellFormat(0, 0, "", "", 1, "", false, 0, "")
 }
 
 func (pdf PDF) MultilineTextCell(

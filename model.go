@@ -17,6 +17,7 @@ const DATE_TIME_FORMAT = "02.01.06 15:04:05"
 type Dossier struct {
 	JournalEntries     Documents
 	AccountingFilePath string
+	BaseCurrency       string
 	CompanyName        string
 	Street             string
 	ZIPCode            string
@@ -48,6 +49,7 @@ func DossierFromXML(path string) (*Dossier, error) {
 	return &Dossier{
 		JournalEntries:     entries,
 		AccountingFilePath: fileInfoTable.GuardedValueById("FileName"),
+		BaseCurrency:       fileInfoTable.GuardedValueById("BasicCurrency"),
 		CompanyName:        fileInfoTable.GuardedValueById("Company"),
 		Street:             fileInfoTable.GuardedValueById("Address1"),
 		ZIPCode:            fileInfoTable.GuardedValueById("Zip"),
@@ -181,7 +183,7 @@ type Transaction struct {
 	Description      string
 	AccountDebit     string
 	AccountCredit    string
-	Amount           string
+	Amount           string // Always base currency.
 	Currency         string
 	AmountCurrency   string
 	ExchangeCurrency string
@@ -220,10 +222,6 @@ func (t Transaction) FmtDate() string {
 
 func (t Transaction) FmtDescription() string {
 	return removeExtraSpaces(t.Description)
-}
-
-func (t Transaction) FmtAmount() string {
-	return fmt.Sprintf("%s CHF", t.Amount)
 }
 
 func removeExtraSpaces(text string) string {
