@@ -9,18 +9,22 @@ import (
 	"time"
 )
 
+const DATE_FORMAT = "02.01.2006"
+const TIME_FORMAT = "15:04:05"
+const DATE_TIME_FORMAT = "02.01.06 15:04:05"
+
 // Everything with the same linked document. Filepath is map key.
 type Dossier struct {
-	JournalEntries    Documents
-	AccountingDirPath string
-	CompanyName       string
-	Street            string
-	ZIPCode           string
-	Place             string
-	DateLastSaved     time.Time
-	TimeLastSaved     time.Time
-	OpeningDate       time.Time
-	ClosureDate       time.Time
+	JournalEntries     Documents
+	AccountingFilePath string
+	CompanyName        string
+	Street             string
+	ZIPCode            string
+	Place              string
+	DateLastSaved      time.Time
+	TimeLastSaved      time.Time
+	OpeningDate        time.Time
+	ClosureDate        time.Time
 }
 
 func DossierFromXML(path string) (*Dossier, error) {
@@ -42,22 +46,46 @@ func DossierFromXML(path string) (*Dossier, error) {
 	}
 
 	return &Dossier{
-		JournalEntries:    entries,
-		AccountingDirPath: filepath.Dir(fileInfoTable.GuardedValueById("FileName")),
-		CompanyName:       fileInfoTable.GuardedValueById("Company"),
-		Street:            fileInfoTable.GuardedValueById("Address1"),
-		ZIPCode:           fileInfoTable.GuardedValueById("Zip"),
-		Place:             fileInfoTable.GuardedValueById("City"),
-		DateLastSaved:     fileInfoTable.GuardedDateById("DateLastSaved"),
-		TimeLastSaved:     fileInfoTable.GuardedTimeById("TimeLastSaved"),
-		OpeningDate:       fileInfoTable.GuardedDateById("OpeningDate"),
-		ClosureDate:       fileInfoTable.GuardedDateById("ClosureDate"),
+		JournalEntries:     entries,
+		AccountingFilePath: fileInfoTable.GuardedValueById("FileName"),
+		CompanyName:        fileInfoTable.GuardedValueById("Company"),
+		Street:             fileInfoTable.GuardedValueById("Address1"),
+		ZIPCode:            fileInfoTable.GuardedValueById("Zip"),
+		Place:              fileInfoTable.GuardedValueById("City"),
+		DateLastSaved:      fileInfoTable.GuardedDateById("DateLastSaved"),
+		TimeLastSaved:      fileInfoTable.GuardedTimeById("TimeLastSaved"),
+		OpeningDate:        fileInfoTable.GuardedDateById("OpeningDate"),
+		ClosureDate:        fileInfoTable.GuardedDateById("ClosureDate"),
 	}, nil
 }
 
 func (d Dossier) ResolveRelativePath(path string) (string, error) {
-	fullPath := filepath.Join(d.AccountingDirPath, path)
+	fullPath := filepath.Join(filepath.Dir(d.AccountingFilePath), path)
 	return filepath.Abs(fullPath)
+}
+
+func (d Dossier) FmtLastSaved() string {
+	dt := d.DateLastSaved.Format(DATE_FORMAT)
+	if d.DateLastSaved == (time.Time{}) {
+		dt = UNKNOWN_STR
+	}
+	tm := d.TimeLastSaved.Format(TIME_FORMAT)
+	if d.TimeLastSaved == (time.Time{}) {
+		tm = UNKNOWN_STR
+	}
+	return fmt.Sprint(dt, " ", tm)
+}
+
+func (d Dossier) FmtPeriod() string {
+	from := d.OpeningDate.Format(DATE_FORMAT)
+	if d.OpeningDate == (time.Time{}) {
+		from = UNKNOWN_STR
+	}
+	to := d.ClosureDate.Format(DATE_FORMAT)
+	if d.ClosureDate == (time.Time{}) {
+		to = UNKNOWN_STR
+	}
+	return fmt.Sprint(from, " – ", to)
 }
 
 type Documents []Document
@@ -187,7 +215,7 @@ func (t Transaction) FmtDate() string {
 	if err != nil {
 		return "<UNDEFINED>"
 	}
-	return date.Format("02.01.06")
+	return date.Format(DATE_FORMAT)
 }
 
 func (t Transaction) FmtDescription() string {

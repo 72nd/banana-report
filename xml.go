@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const UNKNOWN_STR = "<ERROR>"
+
 type AC2 struct {
 	XMLName            xml.Name           `xml:"AC2"`
 	Version            string             `xml:"version,attr"`
@@ -81,7 +83,7 @@ func (t Table) GuardedValueById(id string) string {
 	rsl, err := t.ValueById(id)
 	if err != nil {
 		fmt.Println(err)
-		return "<UNDEFINED>"
+		return UNKNOWN_STR
 	}
 	return rsl
 }

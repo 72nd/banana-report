@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/qr"
@@ -15,14 +16,14 @@ import (
 	"github.com/go-pdf/fpdf/contrib/gofpdi"
 )
 
-//go:embed static/literata_7pt-regular.ttf
+//go:embed static/literata-regular.ttf
 var literataRegular []byte
 
-//go:embed static/literata_7pt-italic.ttf
+//go:embed static/literata-italic.ttf
 var literataItalic []byte
 
-//go:embed static/literata_7pt-semi-bold.ttf
-var literataSemiBold []byte
+//go:embed static/literata-medium.ttf
+var literataMedium []byte
 
 //go:embed static/sad-document.png
 var sadDocument []byte
@@ -34,6 +35,7 @@ const (
 	ColorTeal
 	ColorGreen
 	ColorVermilion
+	ColorAmberLight
 )
 
 func (c DebugColor) GetValues() (r, g, b int) {
@@ -45,6 +47,8 @@ func (c DebugColor) GetValues() (r, g, b int) {
 		return 0x3e, 0x8c, 0x5f
 	case ColorVermilion:
 		return 0xDA, 0x6A, 0x35
+	case ColorAmberLight:
+		return 0xf9, 0xdd, 0x9d
 	default:
 		// Magenta
 		return 0xB4, 0x25, 0x7A
@@ -73,7 +77,7 @@ func NewPDF(debugCells bool, debugLines bool) PDF {
 	pdf.SetAutoPageBreak(false, 10)
 	pdf.AddUTF8FontFromBytes(fontName, "", literataRegular)
 	pdf.AddUTF8FontFromBytes(fontName, "I", literataItalic)
-	pdf.AddUTF8FontFromBytes(fontName, "B", literataSemiBold)
+	pdf.AddUTF8FontFromBytes(fontName, "B", literataMedium)
 
 	imgRd := bytes.NewReader(sadDocument)
 	sadDocumentOpt := fpdf.ImageOptions{
@@ -104,7 +108,7 @@ func (pdf PDF) Build(dossier *Dossier) {
 	for i, doc := range dossier.JournalEntries {
 		embedPDFPageCount := 1
 		for page := 1; page <= embedPDFPageCount; page++ {
-			embedPDFPageCount = pdf.addDocument(*dossier, doc, page)
+			embedPDFPageCount = pdf.addDocument(*dossier, doc, page, i+1)
 		}
 		if i == 10 {
 			// FOR DEBUG
@@ -113,7 +117,7 @@ func (pdf PDF) Build(dossier *Dossier) {
 	}
 }
 
-func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr int) (pageCount int) {
+func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr, reportPageCount int) (pageCount int) {
 	// If not -1 there is another page from this receipt.
 	pdf.AddPage()
 	pdf.Rect(pdf.LeftMargin, pdf.TopMargin, pdf.AreaWidth, pdf.AreaHeight, "D")
@@ -124,7 +128,7 @@ func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr int) (page
 		pdf.addTableRows(doc.Transactions, 4.5)
 	}
 	pageCount = pdf.embedDocument(dossier, doc, embedPageNr, 10)
-	pdf.addFooter(dossier, doc, 10, embedPageNr, pageCount)
+	pdf.addFooter(dossier, doc, 10, embedPageNr, pageCount, reportPageCount)
 	return pageCount
 }
 
@@ -146,7 +150,7 @@ func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 	headingHeight, _ := pdf.TextCell(textBlockWidth, 6.5, title, 0, "LT", 18, "B", 1.5, "", true)
 	pdf.Ln((headingHeight - 1.5) * 1.3)
 	_, descFontSize := pdf.TextCell(textBlockWidth, 5, description1, -1, "LT", 10, "", 1.5, description, true)
-	pdf.TextCell(pdf.GetStringWidth(description2), 5, description2, 0, "LT", descFontSize, "I", 0, description2, true)
+	pdf.TextCell(pdf.GetStringWidth(description2), 5, description2, 0, "LT", descFontSize, "B", 0, description2, true)
 
 	pdf.Line(qrBlockX, pdf.TopMargin, qrBlockX, pdf.TopMargin+qrBlockDimensions)
 	qrCode, err := qr.Encode(doc.Path, qr.L, qr.Unicode)
@@ -191,13 +195,12 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) {
 	for _, tx := range transactions {
 
 		if previousIdent != tx.Ident {
-			// Merged cell for "Ident"
 			if !first {
 				pdf.HLine(0, false, ColorMagenta)
 			}
 
 			pdf.SetCellMargin(1.5)
-			pdf.CellFormat(23, rowHeight, tx.Ident, "", 0, "L", false, 0, "")
+			pdf.CellFormat(23, rowHeight, tx.Ident, "", 0, "L", tx.Ident == "", 0, "")
 			pdf.SetCellMargin(0)
 		} else {
 			// Empty Ident cell for subsequent rows
@@ -307,7 +310,7 @@ func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
 	}
 }
 
-func (pdf PDF) addFooter(dossier Dossier, doc Document, footerHeight float64, embedPageNr, pageCount int) {
+func (pdf PDF) addFooter(dossier Dossier, doc Document, footerHeight float64, embedPageNr, embedTotalPages, reportPageCount int) {
 	startY := pdf.AreaHeight + pdf.TopMargin - footerHeight
 	if pdf.debugLines {
 		pdf.SetDrawColor(255, 0, 255)
@@ -317,19 +320,28 @@ func (pdf PDF) addFooter(dossier Dossier, doc Document, footerHeight float64, em
 		pdf.SetDrawColor(0, 0, 0)
 	}
 
+	lastAddressLine := fmt.Sprintf("%s %s", dossier.ZIPCode, dossier.Place)
+	if embedTotalPages == 0 {
+		embedTotalPages = 1
+	}
+	countInfo := fmt.Sprintf("%d/%d – Page %d", embedPageNr, embedTotalPages, reportPageCount)
+	file := fmt.Sprint("File: ", filepath.Base(dossier.AccountingFilePath))
+	lastSaved := fmt.Sprint("Accounting data as of: ", dossier.FmtLastSaved())
+	createdAt := fmt.Sprint("Report was created on: ", time.Now().Format(DATE_TIME_FORMAT))
+
 	pdf.SetY(startY + .5)
 	lineHeight := (footerHeight - 1) / 3
 	cellWidth := pdf.AreaWidth / 3
 	size := 6.8
 	pdf.TextCell(cellWidth, lineHeight, dossier.CompanyName, 0, "LM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "CM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, "ToDo", 1, "RM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, countInfo, 0, "CM", size, "B", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, file, 1, "RM", size, "", .5, "", false)
 	pdf.TextCell(cellWidth, lineHeight, dossier.Street, 0, "LM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "CM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, "ToDo", 1, "RM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, fmt.Sprintf("%s %s", dossier.ZIPCode, dossier.Place), 0, "LM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "CM", size, "", .5, "", false)
-	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "RM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "", 0, "CM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, lastSaved, 1, "RM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, lastAddressLine, 0, "LM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, dossier.FmtPeriod(), 0, "CM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, createdAt, 0, "RM", size, "", .5, "", false)
 }
 
 func (pdf PDF) HLine(x1 float64, dotted bool, debugColor DebugColor) {
