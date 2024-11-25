@@ -33,7 +33,23 @@ const (
 	ColorMagenta DebugColor = iota
 	ColorTeal
 	ColorGreen
+	ColorVermilion
 )
+
+func (c DebugColor) GetValues() (r, g, b int) {
+	// Defaults to magenta.
+	switch c {
+	case ColorTeal:
+		return 0x43, 0x95, 0xb7
+	case ColorGreen:
+		return 0x3e, 0x8c, 0x5f
+	case ColorVermilion:
+		return 0xDA, 0x6A, 0x35
+	default:
+		// Magenta
+		return 0xB4, 0x25, 0x7A
+	}
+}
 
 type PDF struct {
 	*fpdf.Fpdf
@@ -261,8 +277,6 @@ func (pdf PDF) embedPDF(path string, page int, tableBottomY, footerHeight float6
 }
 
 func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
-	drawR, drawG, drawB := pdf.GetDrawColor()
-
 	pdf.ImageOptions(
 		"sad-document",
 		(pdf.AreaWidth-20)/2,
@@ -277,12 +291,13 @@ func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
 	txt := fmt.Sprintf("One or more error(s) occurred during embedding the file:\n\n%s", strings.Join(errStr, "\n"))
 
 	pdf.SetY(pdf.GetY() + 40 + 10)
-	borderStr := ""
 	pdf.SetCellMargin(1.5)
 	pdf.SetFont(pdf.FontFamily, "", 11)
+
+	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugCells, ColorVermilion)
+	borderStr := ""
 	if pdf.debugCells {
 		borderStr = "1"
-		pdf.setDebugDrawColor()
 	}
 	pdf.MultiCell(pdf.AreaWidth, 5, txt, borderStr, "LT", false)
 	if pdf.debugCells {
@@ -302,16 +317,7 @@ func (pdf PDF) addFooter(doc Document, footerHeight float64) {
 }
 
 func (pdf PDF) HLine(x1 float64, dotted bool, debugColor DebugColor) {
-	if pdf.debugLines && debugColor == ColorTeal {
-		// Teal
-		pdf.SetDrawColor(0x43, 0x95, 0xb7)
-	} else if pdf.debugLines && debugColor == ColorGreen {
-		// Green
-		pdf.SetDrawColor(0x3e, 0x8c, 0x5f)
-	} else if pdf.debugLines {
-		// Magenta
-		pdf.SetDrawColor(255, 0, 255)
-	}
+	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugLines, debugColor)
 
 	if dotted {
 		pdf.SetDashPattern([]float64{.6, .6}, 0)
@@ -323,7 +329,7 @@ func (pdf PDF) HLine(x1 float64, dotted bool, debugColor DebugColor) {
 		pdf.SetDashPattern([]float64{}, 0)
 	}
 	if pdf.debugLines {
-		pdf.SetDrawColor(0, 0, 0)
+		pdf.SetDrawColor(drawR, drawG, drawB)
 	}
 }
 
@@ -358,11 +364,10 @@ func (pdf PDF) TextCell(
 	}
 	pdf.SetCellMargin(margin)
 
-	drawR, drawG, drawB := pdf.GetDrawColor()
+	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugCells, ColorVermilion)
 	borderStr := ""
 	if pdf.debugCells {
 		borderStr = "1"
-		pdf.setDebugDrawColor()
 	}
 
 	pdf.CellFormat(w, h, txtStr, borderStr, ln, alignStr, false, 0, "")
@@ -376,11 +381,7 @@ func (pdf PDF) TextCell(
 }
 
 func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, alignStr string) {
-	drawR, drawG, drawB := pdf.GetDrawColor()
-	if pdf.debugCells {
-		borderStr = "1"
-		pdf.setDebugDrawColor()
-	}
+	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugCells, ColorVermilion)
 
 	for pdf.GetStringWidth(txtStr) > w-1.5 {
 		txtStr = strings.TrimSuffix(txtStr, "…")
@@ -395,8 +396,13 @@ func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, 
 	}
 }
 
-func (pdf PDF) setDebugDrawColor() {
-	pdf.SetDrawColor(0xDA, 0x6A, 0x35)
+func (pdf PDF) setDebugDrawColor(isDebugEnabled bool, color DebugColor) (r, g, b int) {
+	r, g, b = pdf.GetDrawColor()
+	if !isDebugEnabled {
+		return
+	}
+	pdf.SetDrawColor(color.GetValues())
+	return r, g, b
 }
 
 func fitImage(origWidth, origHeight, maxWidth, maxHeight float64) (float64, float64) {
