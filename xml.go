@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 type AC2 struct {
@@ -85,14 +86,48 @@ func (t Table) GuardedValueById(id string) string {
 	return rsl
 }
 
+func (t Table) GuardedDateById(id string) time.Time {
+	rsl, err := t.DateById(id)
+	if err != nil {
+		fmt.Println(err)
+		return time.Time{}
+	}
+	return rsl
+}
+
+func (t Table) GuardedTimeById(id string) time.Time {
+	rsl, err := t.TimeById(id)
+	if err != nil {
+		fmt.Println(err)
+		return time.Time{}
+	}
+	return rsl
+}
+
 func (t Table) ValueById(id string) (string, error) {
 	for _, row := range t.RowList {
-		if row.NodeID != id || row.Value == "" {
+		if row.IdXml != id || row.Value == "" {
 			continue
 		}
 		return row.Value, nil
 	}
 	return "", fmt.Errorf("couldn't find value for id '%s'", id)
+}
+
+func (t Table) DateById(id string) (time.Time, error) {
+	value, err := t.ValueById(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse("02.01.2006", value)
+}
+
+func (t Table) TimeById(id string) (time.Time, error) {
+	value, err := t.ValueById(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse("15:04:05", value)
 }
 
 type Field struct {
@@ -137,4 +172,5 @@ type Row struct {
 	DocInvoice                 string `xml:"DocInvoice,omitempty"`
 	DocLink                    string `xml:"DocLink,omitempty"`
 	Value                      string `xml:"Value,omitempty"`
+	IdXml                      string `xml:"IdXml,omitempty"`
 }

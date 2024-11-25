@@ -17,7 +17,10 @@ type Dossier struct {
 	Street            string
 	ZIPCode           string
 	Place             string
-	LastSaved         string
+	DateLastSaved     time.Time
+	TimeLastSaved     time.Time
+	OpeningDate       time.Time
+	ClosureDate       time.Time
 }
 
 func DossierFromXML(path string) (*Dossier, error) {
@@ -40,12 +43,15 @@ func DossierFromXML(path string) (*Dossier, error) {
 
 	return &Dossier{
 		JournalEntries:    entries,
-		AccountingDirPath: filepath.Dir(fileInfoTable.GuardedValueById("Dateiname")),
-		CompanyName:       fileInfoTable.GuardedValueById("Firma"),
-		Street:            fileInfoTable.GuardedValueById("Adresse1"),
-		ZIPCode:           fileInfoTable.GuardedValueById("Postleitzahl"),
-		Place:             fileInfoTable.GuardedValueById("Ort"),
-		LastSaved:         fileInfoTable.GuardedValueById("ZeitLetzteSpeicherung"),
+		AccountingDirPath: filepath.Dir(fileInfoTable.GuardedValueById("FileName")),
+		CompanyName:       fileInfoTable.GuardedValueById("Company"),
+		Street:            fileInfoTable.GuardedValueById("Address1"),
+		ZIPCode:           fileInfoTable.GuardedValueById("Zip"),
+		Place:             fileInfoTable.GuardedValueById("City"),
+		DateLastSaved:     fileInfoTable.GuardedDateById("DateLastSaved"),
+		TimeLastSaved:     fileInfoTable.GuardedTimeById("TimeLastSaved"),
+		OpeningDate:       fileInfoTable.GuardedDateById("OpeningDate"),
+		ClosureDate:       fileInfoTable.GuardedDateById("ClosureDate"),
 	}, nil
 }
 

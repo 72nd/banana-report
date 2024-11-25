@@ -107,7 +107,8 @@ func (pdf PDF) Build(dossier *Dossier) {
 			embedPDFPageCount = pdf.addDocument(*dossier, doc, page)
 		}
 		if i == 10 {
-			// return
+			// FOR DEBUG
+			return
 		}
 	}
 }
@@ -123,7 +124,7 @@ func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr int) (page
 		pdf.addTableRows(doc.Transactions, 4.5)
 	}
 	pageCount = pdf.embedDocument(dossier, doc, embedPageNr, 10)
-	pdf.addFooter(doc, 10)
+	pdf.addFooter(dossier, doc, 10, embedPageNr, pageCount)
 	return pageCount
 }
 
@@ -142,10 +143,10 @@ func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 	pdf.Bookmark(title, 0, -1)
 
 	pdf.Ln(1.5)
-	headingHeight, _ := pdf.TextCell(textBlockWidth, 6.5, title, 0, "LT", 18, "B", 1.5, "")
+	headingHeight, _ := pdf.TextCell(textBlockWidth, 6.5, title, 0, "LT", 18, "B", 1.5, "", true)
 	pdf.Ln((headingHeight - 1.5) * 1.3)
-	_, descFontSize := pdf.TextCell(textBlockWidth, 5, description1, -1, "LT", 10, "", 1.5, description)
-	pdf.TextCell(pdf.GetStringWidth(description2), 5, description2, 0, "LT", descFontSize, "I", 0, description2)
+	_, descFontSize := pdf.TextCell(textBlockWidth, 5, description1, -1, "LT", 10, "", 1.5, description, true)
+	pdf.TextCell(pdf.GetStringWidth(description2), 5, description2, 0, "LT", descFontSize, "I", 0, description2, true)
 
 	pdf.Line(qrBlockX, pdf.TopMargin, qrBlockX, pdf.TopMargin+qrBlockDimensions)
 	qrCode, err := qr.Encode(doc.Path, qr.L, qr.Unicode)
@@ -306,15 +307,29 @@ func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
 	}
 }
 
-func (pdf PDF) addFooter(doc Document, footerHeight float64) {
-	lineY := pdf.AreaHeight + pdf.TopMargin - footerHeight
+func (pdf PDF) addFooter(dossier Dossier, doc Document, footerHeight float64, embedPageNr, pageCount int) {
+	startY := pdf.AreaHeight + pdf.TopMargin - footerHeight
 	if pdf.debugLines {
 		pdf.SetDrawColor(255, 0, 255)
 	}
-	pdf.Line(pdf.LeftMargin, lineY, pdf.PageWidth-pdf.RightMargin, lineY)
+	pdf.Line(pdf.LeftMargin, startY, pdf.PageWidth-pdf.RightMargin, startY)
 	if pdf.debugLines {
 		pdf.SetDrawColor(0, 0, 0)
 	}
+
+	pdf.SetY(startY + .5)
+	lineHeight := (footerHeight - 1) / 3
+	cellWidth := pdf.AreaWidth / 3
+	size := 6.8
+	pdf.TextCell(cellWidth, lineHeight, dossier.CompanyName, 0, "LM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "CM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "ToDo", 1, "RM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, dossier.Street, 0, "LM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "CM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "ToDo", 1, "RM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, fmt.Sprintf("%s %s", dossier.ZIPCode, dossier.Place), 0, "LM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "CM", size, "", .5, "", false)
+	pdf.TextCell(cellWidth, lineHeight, "ToDo", 0, "RM", size, "", .5, "", false)
 }
 
 func (pdf PDF) HLine(x1 float64, dotted bool, debugColor DebugColor) {
@@ -343,6 +358,7 @@ func (pdf PDF) TextCell(
 	style string,
 	margin float64,
 	calcTxtStr string,
+	shrinkToTxt bool,
 ) (float64, float64) {
 	if style != "" && style != "I" && style != "B" {
 		panic(fmt.Sprintf("text style '%s' is not supported", style))
@@ -352,7 +368,9 @@ func (pdf PDF) TextCell(
 		calcTxtStr = txtStr
 	}
 	size = pdf.fitTextToWidth(calcTxtStr, w, margin, size, style)
-	w = pdf.GetStringWidth(txtStr) + 1.5
+	if shrinkToTxt {
+		w = pdf.GetStringWidth(txtStr) + 1.5
+	}
 
 	if ln == -1 {
 		pdf.Ln(margin)
@@ -393,7 +411,7 @@ func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, 
 
 func (pdf PDF) MultilineTextCell(
 	w float64,
-	lh float64,
+	lineSpread float64,
 	txtStr string,
 	alignStr string,
 	size float64,
@@ -404,6 +422,22 @@ func (pdf PDF) MultilineTextCell(
 		panic(fmt.Sprintf("text style '%s' is not supported", style))
 	}
 
+	drawR, drawG, drawB := pdf.setDebugDrawColor(pdf.debugCells, ColorVermilion)
+	borderStr := ""
+	if pdf.debugCells {
+		borderStr = "1"
+	}
+
+	pdf.SetFont(pdf.FontFamily, style, size)
+	_, fontHeight := pdf.GetFontSize()
+	pdf.Ln(margin)
+	pdf.SetCellMargin(margin)
+
+	pdf.MultiCell(w, fontHeight*lineSpread, txtStr, borderStr, alignStr, false)
+
+	if pdf.debugCells {
+		pdf.SetDrawColor(drawR, drawG, drawB)
+	}
 }
 
 func (pdf PDF) setDebugDrawColor(isDebugEnabled bool, color DebugColor) (r, g, b int) {
