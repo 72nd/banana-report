@@ -86,26 +86,36 @@ func NewPDF(debugCells bool, debugLines bool) PDF {
 
 func (pdf PDF) Build(dossier *Dossier) {
 	for i, doc := range dossier.JournalEntries {
-		pdf.addDocument(*dossier, doc)
+		embedPDFPageCount := 1
+		for page := 1; page <= embedPDFPageCount; page++ {
+			embedPDFPageCount = pdf.addDocument(*dossier, doc, page)
+		}
 		if i == 10 {
 			return
 		}
 	}
 }
 
-func (pdf PDF) addDocument(dossier Dossier, doc Document) {
+func (pdf PDF) addDocument(dossier Dossier, doc Document, embedPageNr int) (pageCount int) {
+	// If not -1 there is another page from this receipt.
 	pdf.AddPage()
 	pdf.Rect(pdf.LeftMargin, pdf.TopMargin, pdf.AreaWidth, pdf.AreaHeight, "D")
-	pdf.addHeader(doc)
+	pdf.addHeader(doc, embedPageNr)
 
-	pdf.addTableHeader(4.5)
-	tableBottomY := pdf.addTableRows(doc.Transactions, 4.5)
-	pdf.embedDocument(dossier, doc, tableBottomY, 10)
+	if embedPageNr == 1 {
+		pdf.addTableHeader(4.5)
+		pdf.addTableRows(doc.Transactions, 4.5)
+	}
+	pageCount = pdf.embedDocument(dossier, doc, embedPageNr, 10)
 	pdf.addFooter(doc, 10)
+	return pageCount
 }
 
-func (pdf PDF) addHeader(doc Document) {
+func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 	title := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
+	if embedPageNr != 1 {
+		title = fmt.Sprintf("%s (cont.)", title)
+	}
 	description1 := fmt.Sprintf("%s — ", doc.Path)
 	description2 := doc.IdentStringList()
 	description := fmt.Sprintf("%s%s", description1, description2)
@@ -154,7 +164,7 @@ func (pdf PDF) addTableHeader(rowHeight float64) {
 	pdf.HLine(0, false, ColorTeal)
 }
 
-func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) float64 {
+func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) {
 	pdf.SetFont(pdf.FontFamily, "", 7)
 
 	// First row of the group
@@ -188,7 +198,6 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) float6
 		previousIdent = tx.Ident
 	}
 	pdf.HLine(0, false, ColorMagenta)
-	return pdf.GetY()
 }
 
 type EmbedError struct {
@@ -200,7 +209,7 @@ func (e EmbedError) String() string {
 	return fmt.Sprintf("Error occurred during %s: %s.", e.Operation, e.Error)
 }
 
-func (pdf PDF) embedDocument(dossier Dossier, doc Document, tableBottomY, footerHeight float64) {
+func (pdf PDF) embedDocument(dossier Dossier, doc Document, page int, footerHeight float64) (pageCount int) {
 	errors := []EmbedError{}
 	path, err := dossier.ResolveRelativePath(doc.Path)
 	if err != nil {
@@ -216,7 +225,7 @@ func (pdf PDF) embedDocument(dossier Dossier, doc Document, tableBottomY, footer
 		})
 	}
 	var embedErr error
-	pdf.embedPDF(path, tableBottomY, footerHeight, &embedErr)
+	pageCount = pdf.embedPDF(path, 1, pdf.GetY(), footerHeight, &embedErr)
 	if embedErr != nil {
 		errors = append(errors, EmbedError{
 			Operation: "embedding file",
@@ -225,10 +234,14 @@ func (pdf PDF) embedDocument(dossier Dossier, doc Document, tableBottomY, footer
 	}
 	if len(errors) != 0 {
 		pdf.addEmbedPDFErrors(errors)
+		for _, err := range errors {
+			fmt.Printf("%s: error during %s\n", path, err.Operation)
+		}
 	}
+	return pageCount
 }
 
-func (pdf PDF) embedPDF(path string, tableBottomY, footerHeight float64, err *error) {
+func (pdf PDF) embedPDF(path string, page int, tableBottomY, footerHeight float64, err *error) (totalPages int) {
 	defer func() {
 		if r := recover(); r != nil {
 			*err = fmt.Errorf("'%s', try to reexport the file in order to fix it", r)
@@ -243,6 +256,8 @@ func (pdf PDF) embedPDF(path string, tableBottomY, footerHeight float64, err *er
 	)
 	x := (pdf.AreaWidth - 2 - width) / 2
 	gofpdi.UseImportedTemplate(pdf, tpl, pdf.LeftMargin+x+1, tableBottomY+1, width, height)
+
+	return len(gofpdi.GetPageSizes())
 }
 
 func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
