@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"os"
@@ -14,14 +15,17 @@ import (
 	"github.com/go-pdf/fpdf/contrib/gofpdi"
 )
 
-//go:embed literata_7pt-regular.ttf
+//go:embed static/literata_7pt-regular.ttf
 var literataRegular []byte
 
-//go:embed literata_7pt-italic.ttf
+//go:embed static/literata_7pt-italic.ttf
 var literataItalic []byte
 
-//go:embed literata_7pt-semi-bold.ttf
+//go:embed static/literata_7pt-semi-bold.ttf
 var literataSemiBold []byte
+
+//go:embed static/sad-document.png
+var sadDocument []byte
 
 type DebugColor int
 
@@ -33,17 +37,18 @@ const (
 
 type PDF struct {
 	*fpdf.Fpdf
-	debugCells   bool
-	debugLines   bool
-	PageWidth    float64
-	PageHeight   float64
-	AreaWidth    float64
-	AreaHeight   float64
-	FontFamily   string
-	LeftMargin   float64
-	TopMargin    float64
-	RightMargin  float64
-	BottomMargin float64
+	debugCells         bool
+	debugLines         bool
+	sadDocumentOptions fpdf.ImageOptions
+	PageWidth          float64
+	PageHeight         float64
+	AreaWidth          float64
+	AreaHeight         float64
+	FontFamily         string
+	LeftMargin         float64
+	TopMargin          float64
+	RightMargin        float64
+	BottomMargin       float64
 }
 
 func NewPDF(debugCells bool, debugLines bool) PDF {
@@ -54,28 +59,35 @@ func NewPDF(debugCells bool, debugLines bool) PDF {
 	pdf.AddUTF8FontFromBytes(fontName, "I", literataItalic)
 	pdf.AddUTF8FontFromBytes(fontName, "B", literataSemiBold)
 
+	imgRd := bytes.NewReader(sadDocument)
+	sadDocumentOpt := fpdf.ImageOptions{
+		ImageType: "PNG",
+	}
+	pdf.RegisterImageOptionsReader("sad-document", sadDocumentOpt, imgRd)
+
 	pageWidth, pageHeight := pdf.GetPageSize()
 	lm, tm, rm, bm := pdf.GetMargins()
 	return PDF{
-		Fpdf:         pdf,
-		debugCells:   debugCells,
-		debugLines:   debugLines,
-		PageWidth:    pageWidth,
-		PageHeight:   pageHeight,
-		AreaWidth:    pageWidth - lm - rm,
-		AreaHeight:   pageHeight - tm - bm,
-		FontFamily:   fontName,
-		LeftMargin:   lm,
-		TopMargin:    tm,
-		RightMargin:  rm,
-		BottomMargin: bm,
+		Fpdf:               pdf,
+		debugCells:         debugCells,
+		debugLines:         debugLines,
+		sadDocumentOptions: sadDocumentOpt,
+		PageWidth:          pageWidth,
+		PageHeight:         pageHeight,
+		AreaWidth:          pageWidth - lm - rm,
+		AreaHeight:         pageHeight - tm - bm,
+		FontFamily:         fontName,
+		LeftMargin:         lm,
+		TopMargin:          tm,
+		RightMargin:        rm,
+		BottomMargin:       bm,
 	}
 }
 
 func (pdf PDF) Build(dossier *Dossier) {
 	for i, doc := range dossier.JournalEntries {
 		pdf.addDocument(*dossier, doc)
-		if i == 4 {
+		if i == 10 {
 			return
 		}
 	}
@@ -89,7 +101,7 @@ func (pdf PDF) addDocument(dossier Dossier, doc Document) {
 	pdf.addTableHeader(4.5)
 	tableBottomY := pdf.addTableRows(doc.Transactions, 4.5)
 	pdf.embedDocument(dossier, doc, tableBottomY, 10)
-	pdf.addFooter(doc, 0)
+	pdf.addFooter(doc, 10)
 }
 
 func (pdf PDF) addHeader(doc Document) {
@@ -179,27 +191,92 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64) float6
 	return pdf.GetY()
 }
 
+type EmbedError struct {
+	Operation string
+	Error     error
+}
+
+func (e EmbedError) String() string {
+	return fmt.Sprintf("Error occurred during %s: %s.", e.Operation, e.Error)
+}
+
 func (pdf PDF) embedDocument(dossier Dossier, doc Document, tableBottomY, footerHeight float64) {
+	errors := []EmbedError{}
 	path, err := dossier.ResolveRelativePath(doc.Path)
 	if err != nil {
-		// TODO: Print error to the document.
-		panic(err)
+		errors = append(errors, EmbedError{
+			Operation: "resolve absolute path",
+			Error:     err,
+		})
 	}
 	if _, err = os.Stat(path); err != nil {
-		panic(err)
+		errors = append(errors, EmbedError{
+			Operation: "check file existence",
+			Error:     err,
+		})
 	}
+	var embedErr error
+	pdf.embedPDF(path, tableBottomY, footerHeight, &embedErr)
+	if embedErr != nil {
+		errors = append(errors, EmbedError{
+			Operation: "embedding file",
+			Error:     embedErr,
+		})
+	}
+	if len(errors) != 0 {
+		pdf.addEmbedPDFErrors(errors)
+	}
+}
+
+func (pdf PDF) embedPDF(path string, tableBottomY, footerHeight float64, err *error) {
+	defer func() {
+		if r := recover(); r != nil {
+			*err = fmt.Errorf("'%s', try to reexport the file in order to fix it", r)
+		}
+	}()
 	tpl := gofpdi.ImportPage(pdf, path, 1, "/MediaBox")
 	width, height := fitImage(
 		210,
 		297,
-		pdf.AreaWidth,
-		pdf.AreaHeight-tableBottomY-pdf.BottomMargin-footerHeight,
+		pdf.AreaWidth-2,
+		pdf.AreaHeight-tableBottomY+footerHeight-footerHeight-2,
 	)
-	gofpdi.UseImportedTemplate(pdf, tpl, pdf.LeftMargin+1.5, tableBottomY+1.5, width, height)
+	x := (pdf.AreaWidth - 2 - width) / 2
+	gofpdi.UseImportedTemplate(pdf, tpl, pdf.LeftMargin+x+1, tableBottomY+1, width, height)
+}
+
+func (pdf PDF) addEmbedPDFErrors(errors []EmbedError) {
+	drawR, drawG, drawB := pdf.GetDrawColor()
+
+	pdf.ImageOptions(
+		"sad-document",
+		(pdf.AreaWidth-20)/2,
+		pdf.GetY()+5,
+		40, 40, false, pdf.sadDocumentOptions, 0, "",
+	)
+
+	errStr := []string{}
+	for _, err := range errors {
+		errStr = append(errStr, fmt.Sprintf("- %s", err))
+	}
+	txt := fmt.Sprintf("One or more error(s) occurred during embedding the file:\n\n%s", strings.Join(errStr, "\n"))
+
+	pdf.SetY(pdf.GetY() + 40 + 10)
+	borderStr := ""
+	pdf.SetCellMargin(1.5)
+	pdf.SetFont(pdf.FontFamily, "", 11)
+	if pdf.debugCells {
+		borderStr = "1"
+		pdf.setDebugDrawColor()
+	}
+	pdf.MultiCell(pdf.AreaWidth, 5, txt, borderStr, "LT", false)
+	if pdf.debugCells {
+		pdf.SetDrawColor(drawR, drawG, drawB)
+	}
 }
 
 func (pdf PDF) addFooter(doc Document, footerHeight float64) {
-	lineY := pdf.AreaHeight - footerHeight
+	lineY := pdf.AreaHeight + pdf.TopMargin - footerHeight
 	if pdf.debugLines {
 		pdf.SetDrawColor(255, 0, 255)
 	}
