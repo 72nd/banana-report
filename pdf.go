@@ -107,7 +107,7 @@ func (pdf PDF) Build(dossier *Dossier) {
 			embedPDFPageCount = pdf.addDocument(*dossier, doc, page)
 		}
 		if i == 10 {
-			return
+			// return
 		}
 	}
 }
@@ -163,8 +163,9 @@ func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 		pdf.TopMargin+.5,
 		14, 14, false,
 	)
-	pdf.Line(pdf.LeftMargin, pdf.TopMargin+qrBlockDimensions, pdf.PageWidth-pdf.RightMargin, pdf.TopMargin+qrBlockDimensions)
-	pdf.Ln(5.7)
+	endOfHeaderY := pdf.TopMargin + qrBlockDimensions
+	pdf.Line(pdf.LeftMargin, endOfHeaderY, pdf.PageWidth-pdf.RightMargin, pdf.TopMargin+qrBlockDimensions)
+	pdf.SetY(endOfHeaderY)
 }
 
 func (pdf PDF) addTableHeader(rowHeight float64) {
@@ -350,13 +351,7 @@ func (pdf PDF) TextCell(
 	if calcTxtStr == "" {
 		calcTxtStr = txtStr
 	}
-	maxTextWidth := w - 2*margin
-	pdf.SetFont(pdf.FontFamily, style, size)
-	for pdf.GetStringWidth(calcTxtStr) > maxTextWidth {
-		size -= .5
-		pdf.SetFont(pdf.FontFamily, style, size)
-	}
-	// Set width to actual needed width
+	size = pdf.fitTextToWidth(calcTxtStr, w, margin, size, style)
 	w = pdf.GetStringWidth(txtStr) + 1.5
 
 	if ln == -1 {
@@ -396,6 +391,21 @@ func (pdf PDF) TableCell(w, h float64, txtStr string, borderStr string, ln int, 
 	}
 }
 
+func (pdf PDF) MultilineTextCell(
+	w float64,
+	lh float64,
+	txtStr string,
+	alignStr string,
+	size float64,
+	style string,
+	margin float64,
+) {
+	if style != "" && style != "I" && style != "B" {
+		panic(fmt.Sprintf("text style '%s' is not supported", style))
+	}
+
+}
+
 func (pdf PDF) setDebugDrawColor(isDebugEnabled bool, color DebugColor) (r, g, b int) {
 	r, g, b = pdf.GetDrawColor()
 	if !isDebugEnabled {
@@ -403,6 +413,18 @@ func (pdf PDF) setDebugDrawColor(isDebugEnabled bool, color DebugColor) (r, g, b
 	}
 	pdf.SetDrawColor(color.GetValues())
 	return r, g, b
+}
+
+func (pdf PDF) fitTextToWidth(txt string, width, margin, maxSize float64, style string) float64 {
+	// Returns font size.
+	rsl := maxSize
+	maxTextWidth := width - 2*margin
+	pdf.SetFont(pdf.FontFamily, style, maxSize)
+	for pdf.GetStringWidth(txt) > maxTextWidth {
+		rsl -= .5
+		pdf.SetFont(pdf.FontFamily, style, rsl)
+	}
+	return rsl
 }
 
 func fitImage(origWidth, origHeight, maxWidth, maxHeight float64) (float64, float64) {
