@@ -224,7 +224,7 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64, baseCu
 		pdf.TableCell(14, rowHeight, tx.AccountDebit, "", 0, "R")
 		pdf.TableCell(14, rowHeight, tx.AccountCredit, "", 0, "R")
 
-		if tx.ExchangeCurrency != baseCurrency {
+		if tx.ExchangeCurrency != "" && tx.ExchangeCurrency != baseCurrency {
 			pdf.ForeignAmountTableCell(20, rowHeight, tx, baseCurrency)
 		} else {
 			amount := fmt.Sprint(tx.Amount, " ", baseCurrency)
