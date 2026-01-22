@@ -13,6 +13,20 @@ const DATE_FORMAT = "02.01.2006"
 const TIME_FORMAT = "15:04:05"
 const DATE_TIME_FORMAT = "02.01.06 15:04:05"
 
+var CURRENCY_SYMBOLS = map[string]string{
+	"EUR": "€",
+	"USD": "$",
+}
+
+// Get the currency symbol for the given currency code.
+func getCurrencySymbol(currency string) string {
+	symbol, ok := CURRENCY_SYMBOLS[currency]
+	if !ok {
+		return currency
+	}
+	return symbol
+}
+
 // Everything with the same linked document. Filepath is map key.
 type Dossier struct {
 	JournalEntries     Documents
@@ -49,7 +63,7 @@ func DossierFromXML(path string) (*Dossier, error) {
 	return &Dossier{
 		JournalEntries:     entries,
 		AccountingFilePath: fileInfoTable.GuardedValueById("FileName"),
-		BaseCurrency:       fileInfoTable.GuardedValueById("BasicCurrency"),
+		BaseCurrency:       getCurrencySymbol(fileInfoTable.GuardedValueById("BasicCurrency")),
 		CompanyName:        fileInfoTable.GuardedValueById("Company"),
 		Street:             fileInfoTable.GuardedValueById("Address1"),
 		ZIPCode:            fileInfoTable.GuardedValueById("Zip"),
@@ -68,11 +82,11 @@ func (d Dossier) ResolveRelativePath(path string) (string, error) {
 
 func (d Dossier) FmtLastSaved() string {
 	dt := d.DateLastSaved.Format(DATE_FORMAT)
-	if d.DateLastSaved == (time.Time{}) {
+	if d.DateLastSaved.Equal(time.Time{}) {
 		dt = UNKNOWN_STR
 	}
 	tm := d.TimeLastSaved.Format(TIME_FORMAT)
-	if d.TimeLastSaved == (time.Time{}) {
+	if d.TimeLastSaved.Equal(time.Time{}) {
 		tm = UNKNOWN_STR
 	}
 	return fmt.Sprint(dt, " ", tm)
@@ -80,11 +94,11 @@ func (d Dossier) FmtLastSaved() string {
 
 func (d Dossier) FmtPeriod() string {
 	from := d.OpeningDate.Format(DATE_FORMAT)
-	if d.OpeningDate == (time.Time{}) {
+	if d.OpeningDate.Equal(time.Time{}) {
 		from = UNKNOWN_STR
 	}
 	to := d.ClosureDate.Format(DATE_FORMAT)
-	if d.ClosureDate == (time.Time{}) {
+	if d.ClosureDate.Equal(time.Time{}) {
 		to = UNKNOWN_STR
 	}
 	return fmt.Sprint(from, " – ", to)
@@ -194,6 +208,7 @@ type Transaction struct {
 	// Cash basis accounting (EÜR) fields
 	Income      string
 	Expenses    string
+	Account     string
 	Category    string
 	CategoryDes string
 }
@@ -213,10 +228,13 @@ func TransactionFromRow(row Row) Transaction {
 		AmountCurrency:   row.AmountCurrency,
 		ExchangeCurrency: row.ExchangeCurrency,
 		ExchangeRate:     row.ExchangeRate,
+		Cc3:              row.Cc3,
+		Cc3Des:           row.Cc3Des,
 
 		// Cash basis accounting (EÜR) fields
 		Income:      row.Income,
 		Expenses:    row.Expenses,
+		Account:     row.Account,
 		Category:    row.Category,
 		CategoryDes: row.CategoryDes,
 	}
@@ -236,6 +254,48 @@ func (t Transaction) FmtDate() string {
 
 func (t Transaction) FmtDescription() string {
 	return removeExtraSpaces(t.Description)
+}
+
+func (t Transaction) GetAccountDebit(cashBasisAccounting bool) string {
+	if cashBasisAccounting {
+		return t.Account
+	}
+	return t.AccountDebit
+}
+
+func (t Transaction) GetAccountCredit(cashBasisAccounting bool) string {
+	if cashBasisAccounting {
+		return t.Category
+	}
+	return t.AccountCredit
+}
+
+func (t Transaction) GetAmount(cashBasisAccounting bool) string {
+	if cashBasisAccounting {
+		var rsl []string
+		if t.Income != "" {
+			rsl = append(rsl, t.Income)
+		}
+		if t.Expenses != "" {
+			rsl = append(rsl, t.Expenses)
+		}
+		return strings.Join(rsl, "/")
+	}
+	return t.AccountDebit
+}
+
+// To represent accounts payable (AP) and receivable (AR) transactions within the cash
+// basis accounting (EÜR) framework, I record an expense without specifying an
+// account and category to cost centre 3 upon receipt of an invoice. These
+// bookings are immaterial for the accounting and should therefore be
+// clearly highlighted as such in the generated PDF.
+//
+// AP/AR auxiliary/immaterial transaction:
+// - Account: Empty
+// - Category: Empty
+// - Cost centre 3: Set to supplier/customer
+func (t Transaction) IsAPARAuxiliary(cashBasisAccounting bool) bool {
+	return cashBasisAccounting && t.Account == "" && t.Category == "" && t.Cc3 != ""
 }
 
 func removeExtraSpaces(text string) string {

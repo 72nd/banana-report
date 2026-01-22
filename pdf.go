@@ -186,14 +186,21 @@ func (pdf PDF) addHeader(doc Document, embedPageNr int) {
 }
 
 func (pdf PDF) addTableHeader(rowHeight float64) {
+	debit_header := "Soll"
+	credit_header := "Haben"
+	if pdf.CashBasisAccounting {
+		debit_header = "Konto"
+		credit_header = "Kategorie"
+	}
+
 	pdf.SetFont(pdf.FontFamily, "B", 7)
 	pdf.SetCellMargin(1.5)
 	pdf.CellFormat(23, rowHeight, "Beleg", "", 0, "L", false, 0, "")
 	pdf.SetCellMargin(0)
 	pdf.CellFormat(14, rowHeight, "Datum", "", 0, "L", false, 0, "")
 	pdf.CellFormat(103.49, rowHeight, "Beschreibung", "", 0, "L", false, 0, "")
-	pdf.CellFormat(14, rowHeight, "Soll", "", 0, "R", false, 0, "")
-	pdf.CellFormat(14, rowHeight, "Haben", "", 0, "R", false, 0, "")
+	pdf.CellFormat(14, rowHeight, debit_header, "", 0, "R", false, 0, "")
+	pdf.CellFormat(14, rowHeight, credit_header, "", 0, "R", false, 0, "")
 	pdf.CellFormat(20, rowHeight, "Betrag", "", 1, "R", false, 0, "")
 	pdf.HLine(0, false, ColorTeal)
 }
@@ -220,22 +227,41 @@ func (pdf PDF) addTableRows(transactions Transactions, rowHeight float64, baseCu
 			pdf.CellFormat(23, rowHeight, "", "", 0, "L", false, 0, "")
 		}
 
+		// Set the font color to gray for AP/AR auxiliary transactions.
+		if tx.IsAPARAuxiliary(pdf.CashBasisAccounting) {
+			pdf.SetTextColor(120, 120, 120)
+			pdf.SetFont(pdf.FontFamily, "I", 7)
+		}
+
 		// Add transaction details
 		pdf.TableCell(14, rowHeight, tx.FmtDate(), "", 0, "L")
 		pdf.TableCell(103.49, rowHeight, tx.FmtDescription(), "", 0, "L")
-		pdf.TableCell(14, rowHeight, tx.AccountDebit, "", 0, "R")
-		pdf.TableCell(14, rowHeight, tx.AccountCredit, "", 0, "R")
+		if !tx.IsAPARAuxiliary(pdf.CashBasisAccounting) {
+			// Default case: AP/AR auxiliary transaction in cash basis accounting.
+			pdf.TableCell(14, rowHeight, tx.GetAccountDebit(pdf.CashBasisAccounting), "", 0, "R")
+			pdf.TableCell(14, rowHeight, tx.GetAccountCredit(pdf.CashBasisAccounting), "", 0, "R")
+		} else {
+			// pdf.SetFont(pdf.FontFamily, "I", 7)
+			pdf.TableCell(28, rowHeight, fmt.Sprintf("%s (KS 3)", tx.Cc3), "", 0, "R")
+			// pdf.SetFont(pdf.FontFamily, "", 7)
+		}
 
 		if tx.ExchangeCurrency != "" && tx.ExchangeCurrency != baseCurrency {
 			pdf.ForeignAmountTableCell(20, rowHeight, tx, baseCurrency)
 		} else {
-			amount := fmt.Sprint(tx.Amount, " ", baseCurrency)
+			amount := fmt.Sprint(tx.GetAmount(pdf.CashBasisAccounting), " ", baseCurrency)
 			pdf.TableCell(20, rowHeight, amount, "", 1, "R")
 		}
 
 		pdf.SetDashPattern([]float64{}, 0)
 		first = false
 		previousIdent = tx.Ident
+
+		// Reset the font color to black.
+		if tx.IsAPARAuxiliary(pdf.CashBasisAccounting) {
+			pdf.SetTextColor(0, 0, 0)
+			pdf.SetFont(pdf.FontFamily, "", 7)
+		}
 	}
 	pdf.HLine(0, false, ColorMagenta)
 }
@@ -467,7 +493,7 @@ func (pdf PDF) ForeignAmountTableCell(
 	margin := (h - height7pt - height5pt) / 2
 
 	pdf.SetFont(pdf.FontFamily, "", 7)
-	baseAmount := fmt.Sprint(transaction.Amount, " ", baseCurrency)
+	baseAmount := fmt.Sprint(transaction.GetAmount(pdf.CashBasisAccounting), " ", baseCurrency)
 	pdf.CellFormat(w, height7pt+margin, baseAmount, borderStr, 2, "RB", false, 0, "")
 
 	exchangeInfo := fmt.Sprintf(

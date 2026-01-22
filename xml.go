@@ -156,7 +156,6 @@ type Row struct {
 	Style                      string `xml:"Style,omitempty"`
 	Section                    string `xml:"Section,omitempty"`
 	Description                string `xml:"Description,omitempty"`
-	Account                    string `xml:"Account,omitempty"`
 	AccountDebit               string `xml:"AccountDebit,omitempty"`
 	AccountDebitDes            string `xml:"AccountDebitDes,omitempty"`
 	AccountCredit              string `xml:"AccountCredit,omitempty"`
@@ -181,6 +180,7 @@ type Row struct {
 	// Cash basis accounting (EÜR) fields
 	Income      string `xml:"Income,omitempty"`
 	Expenses    string `xml:"Expenses,omitempty"`
+	Account     string `xml:"Account,omitempty"`
 	Category    string `xml:"Category,omitempty"`
 	CategoryDes string `xml:"CategoryDes,omitempty"`
 }
