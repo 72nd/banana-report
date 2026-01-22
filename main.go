@@ -8,11 +8,12 @@ import (
 
 func main() {
 	var args struct {
-		InputPath      string `cli:"#R, -i, --input, path to Banana XML file"`
-		OutputPath     string `cli:"#R, -o, --output, PDF output path"`
-		DebugCells     bool   `cli:"--debug-cells, enable debug mode for PDF cells"`
-		DebugLines     bool   `cli:"--debug-lines, enable debug mode for PDF lines"`
-		StepEmbedError bool   `cli:"--step-embed-error, stop on embed error and open file"`
+		InputPath        string `cli:"#R, -i, --input, path to Banana XML file"`
+		OutputPath       string `cli:"#R, -o, --output, PDF output path"`
+		DebugCells       bool   `cli:"--debug-cells, enable debug mode for PDF cells"`
+		DebugLines       bool   `cli:"--debug-lines, enable debug mode for PDF lines"`
+		StepEmbedError   bool   `cli:"--step-embed-error, stop on embed error and open file"`
+		CashBasisAccount string `cli:"--cash-basis, switch to cash basis account (EÜR)"`
 	}
 	mcli.Parse(&args)
 	dossier, err := DossierFromXML(args.InputPath)

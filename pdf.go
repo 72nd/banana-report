@@ -58,22 +58,23 @@ func (c DebugColor) GetValues() (r, g, b int) {
 
 type PDF struct {
 	*fpdf.Fpdf
-	debugCells         bool
-	debugLines         bool
-	stepEmbedError     bool
-	sadDocumentOptions fpdf.ImageOptions
-	PageWidth          float64
-	PageHeight         float64
-	AreaWidth          float64
-	AreaHeight         float64
-	FontFamily         string
-	LeftMargin         float64
-	TopMargin          float64
-	RightMargin        float64
-	BottomMargin       float64
+	debugCells          bool
+	debugLines          bool
+	stepEmbedError      bool
+	sadDocumentOptions  fpdf.ImageOptions
+	CashBasisAccounting bool
+	PageWidth           float64
+	PageHeight          float64
+	AreaWidth           float64
+	AreaHeight          float64
+	FontFamily          string
+	LeftMargin          float64
+	TopMargin           float64
+	RightMargin         float64
+	BottomMargin        float64
 }
 
-func NewPDF(debugCells, debugLines, stepEmbedError bool) PDF {
+func NewPDF(cashBasisAccounting bool, debugCells, debugLines, stepEmbedError bool) PDF {
 	fontName := "Literata"
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetAutoPageBreak(false, 10)
@@ -90,20 +91,21 @@ func NewPDF(debugCells, debugLines, stepEmbedError bool) PDF {
 	pageWidth, pageHeight := pdf.GetPageSize()
 	lm, tm, rm, bm := pdf.GetMargins()
 	return PDF{
-		Fpdf:               pdf,
-		debugCells:         debugCells,
-		debugLines:         debugLines,
-		stepEmbedError:     stepEmbedError,
-		sadDocumentOptions: sadDocumentOpt,
-		PageWidth:          pageWidth,
-		PageHeight:         pageHeight,
-		AreaWidth:          pageWidth - lm - rm,
-		AreaHeight:         pageHeight - tm - bm,
-		FontFamily:         fontName,
-		LeftMargin:         lm,
-		TopMargin:          tm,
-		RightMargin:        rm,
-		BottomMargin:       bm,
+		Fpdf:                pdf,
+		debugCells:          debugCells,
+		debugLines:          debugLines,
+		stepEmbedError:      stepEmbedError,
+		sadDocumentOptions:  sadDocumentOpt,
+		CashBasisAccounting: cashBasisAccounting,
+		PageWidth:           pageWidth,
+		PageHeight:          pageHeight,
+		AreaWidth:           pageWidth - lm - rm,
+		AreaHeight:          pageHeight - tm - bm,
+		FontFamily:          fontName,
+		LeftMargin:          lm,
+		TopMargin:           tm,
+		RightMargin:         rm,
+		BottomMargin:        bm,
 	}
 }
 

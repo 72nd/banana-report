@@ -175,4 +175,16 @@ type Row struct {
 	DocLink                    string `xml:"DocLink,omitempty"`
 	Value                      string `xml:"Value,omitempty"`
 	IdXml                      string `xml:"IdXml,omitempty"`
+	Cc3                        string `xml:"Cc3,omitempty"`
+	Cc3Des                     string `xml:"Cc3Des,omitempty"`
+
+	// Cash basis accounting (EÜR) fields
+	Income      string `xml:"Income,omitempty"`
+	Expenses    string `xml:"Expenses,omitempty"`
+	Category    string `xml:"Category,omitempty"`
+	CategoryDes string `xml:"CategoryDes,omitempty"`
+}
+
+func (r Row) IsCashBasis() bool {
+	return r.Income != "" || r.Expenses != "" || r.Category != ""
 }

@@ -188,6 +188,14 @@ type Transaction struct {
 	AmountCurrency   string
 	ExchangeCurrency string
 	ExchangeRate     string
+	Cc3              string // Cost center 3
+	Cc3Des           string // Cost center 3 description
+
+	// Cash basis accounting (EÜR) fields
+	Income      string
+	Expenses    string
+	Category    string
+	CategoryDes string
 }
 
 func TransactionFromRow(row Row) Transaction {
@@ -205,6 +213,12 @@ func TransactionFromRow(row Row) Transaction {
 		AmountCurrency:   row.AmountCurrency,
 		ExchangeCurrency: row.ExchangeCurrency,
 		ExchangeRate:     row.ExchangeRate,
+
+		// Cash basis accounting (EÜR) fields
+		Income:      row.Income,
+		Expenses:    row.Expenses,
+		Category:    row.Category,
+		CategoryDes: row.CategoryDes,
 	}
 }
 
