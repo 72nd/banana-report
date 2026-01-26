@@ -1,12 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
 const DATE_FORMAT = "02.01.2006"
@@ -25,6 +30,11 @@ func getCurrencySymbol(currency string) string {
 		return currency
 	}
 	return symbol
+}
+
+func resolveRelativePath(basePath, path string) (string, error) {
+	fullPath := filepath.Join(filepath.Dir(basePath), path)
+	return filepath.Abs(fullPath)
 }
 
 // Everything with the same linked document. Filepath is map key.
@@ -52,13 +62,14 @@ func DossierFromXML(path string) (*Dossier, error) {
 	if err != nil {
 		return nil, err
 	}
-	journal := JournalFromTable(*journalTable)
-	entries := EntriesFromJournal(journal)
 
 	fileInfoTable, err := ac.TableById("FileInfo")
 	if err != nil {
 		return nil, err
 	}
+
+	journal := JournalFromTable(*journalTable)
+	entries := EntriesFromJournal(journal, fileInfoTable.GuardedValueById("FileName"))
 
 	return &Dossier{
 		JournalEntries:     entries,
@@ -75,9 +86,16 @@ func DossierFromXML(path string) (*Dossier, error) {
 	}, nil
 }
 
+func (d Dossier) ToJSON(path string) error {
+	data, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
 func (d Dossier) ResolveRelativePath(path string) (string, error) {
-	fullPath := filepath.Join(filepath.Dir(d.AccountingFilePath), path)
-	return filepath.Abs(fullPath)
+	return resolveRelativePath(d.AccountingFilePath, path)
 }
 
 func (d Dossier) FmtLastSaved() string {
@@ -106,15 +124,12 @@ func (d Dossier) FmtPeriod() string {
 
 type Documents []Document
 
-func EntriesFromJournal(journal Transactions) Documents {
+func EntriesFromJournal(journal Transactions, accountingFilePath string) Documents {
 	tmp := map[string]Document{}
 	for _, transaction := range journal {
 		path := strings.TrimSpace(transaction.Path)
 		if _, exists := tmp[path]; !exists {
-			tmp[path] = Document{
-				Path:         path,
-				Transactions: []Transaction{},
-			}
+			tmp[path] = NewDocument(accountingFilePath, path)
 		}
 		// fmt.Println(tmp[path][transaction.Ident].transactions)
 		doc := tmp[path]
@@ -145,7 +160,41 @@ func (d Documents) Less(i, j int) bool {
 // All docs of one doc-ident. Doc-ident is map key.
 type Document struct {
 	Path         string
+	AbsolutePath string
+	IsValidFile  bool
+	PageCount    int
+	FileError    error
+	FileUUID     string
 	Transactions Transactions
+}
+
+func NewDocument(accountingFilePath, path string) Document {
+	rsl := Document{
+		Path:         path,
+		Transactions: []Transaction{},
+		FileUUID:     uuid.New().String() + ".pdf",
+	}
+	var err error
+	rsl.AbsolutePath, err = resolveRelativePath(accountingFilePath, path)
+	if err != nil {
+		rsl.FileError = err
+		return rsl
+	}
+
+	err = isValidFile(rsl.AbsolutePath)
+	rsl.IsValidFile = err == nil
+	if err != nil {
+		rsl.FileError = err
+		return rsl
+	}
+
+	rsl.PageCount, err = GetPDFPageCount(rsl.AbsolutePath)
+	if err != nil {
+		rsl.FileError = err
+		return rsl
+	}
+
+	return rsl
 }
 
 func (d Document) IdentStringList() string {
@@ -163,6 +212,25 @@ func (d Document) IdentStringList() string {
 		}
 	}
 	return strings.Join(rsl, ", ")
+}
+
+func (d Document) CreateSymlinkInFolder(folderPath string) error {
+	if d.AbsolutePath == "" {
+		return fmt.Errorf("absolute path for document not set")
+	}
+	if d.FileUUID == "" {
+		return fmt.Errorf("file UUID for document not set")
+	}
+
+	linkPath := filepath.Join(folderPath, d.FileUUID)
+
+	// Remove existing symlink/file if exists
+	_ = os.Remove(linkPath)
+	err := os.Symlink(d.AbsolutePath, linkPath)
+	if err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+	return nil
 }
 
 type Transactions []Transaction
@@ -314,4 +382,31 @@ func removeExtraSpaces(text string) string {
 		lastWasSpace = false
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func isValidFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("path is empty")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("path %s is a directory, not a file", path)
+	}
+	if info.Size() == 0 {
+		return fmt.Errorf("path %s is a zero-size file", path)
+	}
+	return nil
+}
+
+// GetPDFPageCount returns the number of pages in the PDF at the given path using pdfcpu.
+// It returns the page count or an error.
+func GetPDFPageCount(pdfPath string) (int, error) {
+	pageCount, err := api.PageCountFile(pdfPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get page count: %w", err)
+	}
+	return pageCount, nil
 }
